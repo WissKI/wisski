@@ -1,0 +1,1335 @@
+<?php
+// $ID$
+
+//include_once("arc/ARC2.php");
+//include_once("../wisski_Store.php");
+
+/**
+* Create a wisski-class object. All complex functions are stored there.
+* the .module file just handles the drupal-communication and should only
+* contains hooks and so on.
+*
+*
+* @author: Mark Fichtner
+* @return: Returns a wisski-object
+*/
+
+/**Use this constant to toggle / implement special development behaviour
+* @author Martin Scholz
+*/
+define('WISSKI_DEVEL', TRUE);
+
+
+/**
+* Create three node types: 
+* - OWL:Class
+* - Propertys
+* - Individuals
+* Individuals can be created and edited. OWL:Class- and Property-nodes
+* are just readable and only available for viewing.
+* @author: Mark Fichtner
+* @return: Returns an array of three node-types to be created.
+*/
+function wisski_node_info() {
+  return array(
+    'individual' => array(
+      'name' => t('Individual node'),
+      'module' => 'wisski',
+      'description' => t("This is the node for individuals of owl:classes."),
+    ),
+		'class' => array(
+      'name' => t('Class node'),
+      'module' => 'wisski',
+      'description' => t("This is the node for owl:classes."),
+      'has_title' => TRUE,
+      'title_label' => t('Class title'),
+      'has_body' => TRUE,
+      'body_label' => t('Class body'),
+    ),
+		'property' => array(
+      'name' => t('Property node'),
+      'module' => 'wisski',
+      'description' => t("This is the node for owl:Object/DatatypeProperty."),
+      'has_title' => TRUE,
+      'title_label' => t('Property title'),
+      'has_body' => TRUE,
+      'body_label' => t('Property body'),
+    )
+  );
+}
+
+
+/**
+* Add the input forms that should be displayed when the edit-button or the
+* add-button is clicked.
+* This is obsolete and just used if wisski-template is not available.
+* @author: Mark Fichtner
+* @return: Returns an array of the forms that should be included 
+*/
+
+function wisski_form(&$node, $form_state) {
+	
+	$form['node'] = array(
+	    '#type' => 'value',
+			'#value' => $node,
+	);
+
+	// If we come from "annotate text" the session memory is in $_SESSION
+	if(isset($_SESSION['storage'])) {
+		// get the old triples out of the form_state
+		$form_state['storage'] = $_SESSION['storage'];
+		
+		$node->step = 2;
+		$form['triples'] = array('#type' => 'value', '#value' => $_SESSION['storage']['triples']);
+
+		$form['annotatedTriples'] = array('#type' => 'value', '#value' => $_SESSION['storage']['annotatedTriples']);
+		// Now delete the Session memory as it is not necessary anymore.
+	  unset($_SESSION['storage']);
+	}
+
+	$title = "";
+	// if edit is clicked, the title is already in the node object
+	if($form_state['storage']['title'] == NULL)
+		$title = $node->title;
+	else // The title comes from the storage if we come from step1 or from annotate text
+		$title = $form_state['storage']['title'];
+
+
+	$body = "";
+	// same with the body: Edit?
+	if($form_state['storage']['body'] == NULL)
+		$body = $node->body;
+	else // or new node?
+		$body = $form_state['storage']['body'];
+    
+	// now we should have a title and a body. Set the node properties accordingly
+	$node->title = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($title);
+	$node->body = $body;
+
+	// @TODO: handle multiple instanciation of individuals
+	$type = "";
+	// Read from the database if we are in edit mode
+	if(sizeof(wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type')) > 0) {
+		$returned = wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type'); 
+		$type = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($returned[0]);
+	}
+	// if $type is still not there, we are not in edit mode but create a new one -> storage
+	if($type == NULL) $type = $form_state['storage']['instanceOf'];
+
+	// The title is required as there can be no node without a title.
+    $form['title'] = array(
+    	'#title' => t('required title'),
+    	'#type' => 'textfield',
+    	'#required' => TRUE,
+    	'#default_value' => $title,
+		// @TODO: The title should be validated (?)
+		//'#element_validate' => array('wisski_getNameAndInstance'),
+    );
+
+
+	// A field for the body
+	if (module_exists('rdfaify') && $node->type == "individual") {
+		$form['annotation'] = array(
+			//'#weight' => '1',
+			'#collapsed' => FALSE,
+			'#type' => 'fieldset',
+			'#collapsible' => '1',
+			'#title' => t("Annotate text:"),
+		);	
+
+		// make the body for annotations
+  	$form['annotation']['body_field'] = node_body_field($node, t('Text for Annotation'), 0);
+	
+		$form['annotation']['reAnnotate'] = array(
+  		'#type' => 'submit',
+  		'#value' => 're-annotate',
+  		'#submit' => array('wisski_saveTitle', 'wisski_savePropertyState', 'wisski_annotate_submit'),
+		);
+	}
+
+	// calculate the upper classes	
+	$upperClasses = array();
+	// and sum up the triples from the form and from the database
+	$triples = array();
+
+	// get the triples that were currently created e.g. if we create smthg	
+	if(isset($form_state['storage']['ownTriples'])) {
+		$triples = $form_state['storage']['ownTriples'];
+	}
+	
+	// get the triples that are already in the store e.g. if we are in edit-mode
+	if($title != "") {
+		$storedTriples = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForSubject($title);
+		//print_r($storedTriples);
+		$triples = array_merge($triples, $storedTriples);
+	}	
+
+	// pre-build the instance-of and the property-display to arrange it lateron	
+	$instanceOfToAdd = array();
+	$propertiesToAdd = array();
+	
+	// iterate the triples and build accordingly
+	for($i = 0; $i < count($triples); $i++) { 
+		$triple = $triples[$i];
+		// ist it an instance-of triple?
+		if(wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['y']) == 'rdf:type') {
+			$instanceOfToAdd[$i]['#collapsed'] = '';
+		
+			$instanceOfToAdd[$i][] = array(
+				'#title' => t(''),
+				'#type' => 'textfield',
+				'#default_value' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['z']),
+			);
+			
+			$upperClasses = array_merge($upperClasses, wisski_store_getObj()->wisski_ARCAdapter_getUpperClasses(wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['z'])));
+			
+			// @TODO: build delete button to get rid of these in case of wrong input.
+		}	else { // is it a property?
+			if(!isset($propertiesToAdd[wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['y'])])) {
+				$propertiesToAdd[wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['y'])] = array(
+		 			'#collapsed' => '',
+		 			'#type' => 'fieldset',
+		 			'#collapsible' => '1',
+		 			'#title' => t(wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['y'])),
+		 			'#tree' => TRUE,
+				);
+			}
+			
+			$propertiesToAdd[wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['y'])][$i] = array(
+				'#title' => t(''),
+				'#type' => 'textfield',
+				'#default_value' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple['z']),
+				'#tree' => TRUE,
+			);
+		}
+	}
+	
+	
+	
+	if(count($instanceOfToAdd) > 0) {
+		$form['instanceOf'] = array(
+		  '#collapsed' => '',
+		  '#type' => 'fieldset',
+		 	'#collapsible' => '1',
+		  '#title' => t('This individual is of Class:'),
+		);
+		$form['instanceOf']['instanceOf'] = $instanceOfToAdd;
+		$form['instanceOf']['instanceOf']['#tree'] = TRUE;
+	} else {
+		$form['instanceOf'] = array(
+		  '#collapsed' => '',
+		  '#type' => 'fieldset',
+		 	'#collapsible' => '1',
+		  '#title' => t('Please add the class this individual belongs to:'),
+		);
+	}
+	
+	$form['propfield'] = array(
+		'#collapsed' => '',
+		'#type' => 'fieldset',
+		'#collapsible' => '1',
+		'#title' => t('Please add properties to this individual:'),
+		'#tree' => FALSE,	
+	);
+	
+	if(count($propertiesToAdd) > 0) {
+		$form['propfield']['properties'] = $propertiesToAdd;
+		$form['propfield']['properties']['#tree'] = TRUE;	
+	}
+	
+    
+	$form['instanceOf']['instanceOfSelect'] = array(
+  		'#key_type' => 'associative',
+  		'#multiple_toggle' => '1',
+  		'#type' => 'select',
+  		'#options' => wisski_store_getObj()->wisski_ARCAdapter_getAllConcepts(),
+  		'#title' => 'Select the type of this individual',
+	);
+
+	$form['instanceOf']['instanceOfAdd'] = array(
+  	'#type' => 'submit',
+    '#value' => 'add type',
+    '#submit' => array('wisski_valuesToStorage', 'wisski_saveInstanceOfState', 'wisski_savePropertyState', 'wisski_addInstanceOf'),
+	);
+	
+	{
+		
+		$properties = array();
+		// get all the properties from the upper classes
+		foreach ($upperClasses as $class) {
+			$prop = wisski_store_getObj()->wisski_ARCAdapter_getPropertiesForDomain($class);
+
+			foreach ($prop as $p) {
+				if(!in_array($p, $properties)) {
+					$properties[] = $p;
+				}
+			}
+		}
+	}
+
+	// add a field and button for adding properties
+	$form['propfield']['avail_prop'] = array(
+	  	'#key_type' => 'associative',
+	  	'#multiple_toggle' => '1',
+	  	'#type' => 'select',
+	  	'#options' => $properties,
+	  	'#title' => 'Available propertys to add',
+	);
+
+  $form['propfield']['add_prop'] = array(
+    '#type' => 'submit',
+    '#value' => 'add property',
+    '#submit' => array('wisski_valuesToStorage', 'wisski_saveInstanceOfState', 'wisski_savePropertyState', 'wisski_addPropertyToEdit'),
+  );
+
+	return $form;
+}
+
+function wisski_saveTitle($form, &$form_state) {
+	$form_state['storage']['title'] = $form_state['values']['title'];
+}
+
+function wisski_saveInstanceOfState($form, &$form_state) {
+	if(isset($form_state['values']['instanceOf'])) {
+		foreach($form_state['values']['instanceOf'] as $tripleNr => $propValues) {
+			foreach($propValues as $propName => $tripleData) {
+				$form_state['storage']['ownTriples'][$tripleNr]['x'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form_state['values']['title']);
+				$form_state['storage']['ownTriples'][$tripleNr]['y'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace("rdf:type");
+				$form_state['storage']['ownTriples'][$tripleNr]['z'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($tripleData);
+			}
+		}
+	}
+}
+
+function wisski_savePropertyState($form, &$form_state) {
+	if(isset($form_state['values']['properties'])) {
+		foreach($form_state['values']['properties'] as $propName => $propValues) {
+			foreach($propValues as $tripleNr => $tripleData) {
+				$form_state['storage']['ownTriples'][$tripleNr]['x'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form_state['values']['title']);
+				$form_state['storage']['ownTriples'][$tripleNr]['y'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($propName);
+				$form_state['storage']['ownTriples'][$tripleNr]['z'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($tripleData);
+			}
+		}
+	}
+}
+
+/**
+ * This function is the handler for the instance-Of-Adding
+ * @author Mark Fichtner
+ */
+function wisski_addInstanceOf($form, &$form_state) {
+	$triple = array();
+	$triple['x'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form_state['values']['title']);
+	$triple['y'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace('rdf:type');
+	$triple['z'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form['instanceOf']['instanceOfSelect']['#options'][$form_state['values']['instanceOfSelect']]);
+	$form_state['storage']['ownTriples'][] = $triple;
+}
+
+function wisski_addPropertyToEdit($form, &$form_state) {
+	$triple = array();
+	$triple['x'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form_state['values']['title']);
+	$triple['y'] = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($form['propfield']['avail_prop']['#options'][$form_state['values']['avail_prop']]);
+	$triple['z'] = "";
+	
+	$form_state['storage']['ownTriples'][] = $triple;
+}
+
+/**
+ * Function for "annotate text" in "create content"-menu
+ * @author Mark Fichtner
+ */ 
+function wisski_annotate(&$dies) {
+	$form = array();
+	$form['annotation'] = array(
+		//'#weight' => '1',
+		'#collapsed' => FALSE,
+		'#type' => 'fieldset',
+		'#collapsible' => '1',
+		'#title' => t("Annotate text:"),
+	);	
+
+  $form['annotation']['body'] = array(
+		'#title' => t('Text for annotation'),
+    '#type' => 'textarea',
+  );
+
+
+  $form['buttons']['submit'] = array(
+        '#type' => 'submit',
+        '#value' => 'next',
+  );
+
+	$form['#redirect'] = 'node/add/individual';//, $form_state['values']);
+
+	return $form;
+}
+
+
+function wisski_str2triples($string) {
+	if(!module_exists('rdfaify'))
+		return array();
+	$rdfa = _rdfaify_annotate_string($string);
+	$triples = _rdfaify_get_triples($rdfa);
+
+	$triples = wisski_sauceMe($triples);
+	
+	
+	return $triples;
+}
+
+function wisski_sauceMe($triples) {
+  
+  if(!module_exists('sauce')) 
+    return $triples;
+  
+  $saucen = sauce_Base::getActivatedSauces();
+  
+  foreach($saucen as $sn) {
+    $sauce = sauce_Base::getSauce($sn);
+    $triples = $sauce->augment($triples);
+  }
+
+  return $triples;
+}
+
+
+function wisski_cmp($triple1, $triple2) {
+	if( ($triple1['s'] == $triple2['s'] && $triple1['p'] == $triple2['p'] && $triple1['o'] == $triple2['o'] ) ||
+			($triple1['x'] == $triple2['x'] && $triple1['y'] == $triple2['y'] && $triple1['z'] == $triple2['z'] ) ||
+			($triple1['s'] == $triple2['x'] && $triple1['p'] == $triple2['y'] && $triple1['o'] == $triple2['z'] ) ||
+			($triple1['x'] == $triple2['s'] && $triple1['y'] == $triple2['p'] && $triple1['z'] == $triple2['o'] ) )
+		return 0;
+	else 
+		return 1;
+}
+
+
+function wisski_convertTriplesFromRDFA($triples) {
+	$mainns = "http://www8.informatik.uni-erlangen.de/IMMD8/Services/cidoc-crm/mapping/wisski/wisskibase.owl"; //"http://www8.informatik.uni-erlangen.de/IMMD8/Services/cidoc-crm/erlangen-crm_090330_5_0_1_TQ.owl";
+
+	$toAdd = array();
+	$outTriples = array();
+
+	$oldToNewID = array();
+	
+	for($i=0; $i<count($triples); $i++) {
+		foreach($triples[$i] as &$triplepart) {
+			
+			preg_match('/gen_e[\d]{1,2}_[a-z0-9_]*N[\d]{5}/', $triplepart, $matches);
+
+			foreach($matches as $match) {
+				if(!isset($oldToNewID[$match])) {
+					preg_match('/_e[\d]{1,2}_/', $match, $submatches);
+					$oldToNewID[$match] = 'wisski' . $submatches[0] . wisski_store_getObj()->wisski_Store_getNewUniqueID();
+				}
+				$triplepart = str_replace($match, $oldToNewID[$match], $triplepart);
+			}
+				
+		
+			$triplepart = str_replace($mainns, 'http://www8.informatik.uni-erlangen.de/IMMD8/Services/cidoc-crm/erlangen-crm_090714_5_0_1.owl', $triplepart);
+			$triplepart = str_replace('http://faui8185.informatik.uni-erlangen.de/msdrupal/rootms#', url('<front>',array('absolute' => TRUE)) . 'content/', $triplepart);
+		} 
+		
+		$mainsubj = $triples[0]['s'];
+
+		if(strcmp($triples[$i]['s'], $mainsubj) == 0) {
+			if($triples[$i]['p'] != wisski_store_getObj()->wisski_ARCAdapter_delNamespace(wisski_store_getObj()->wisski_ARCAdapter_getEcrmNS() . ":P129.is_about"))
+				$toAdd[] = $triples[$i];
+		}	else {
+			$toAdd[] = $triples[$i];
+		}
+	}
+
+	$hasSeen = array();
+	$hasSeen[$mainsubj] = 1;
+
+	foreach($toAdd as $triple) {
+		if(!isset($hasSeen[$triple['s']])) {
+			$toAdd[] = array(
+				's' => $mainsubj,
+				's_type' => 'uri',
+				'p' => wisski_store_getObj()->wisski_ARCAdapter_delNamespace(wisski_store_getObj()->wisski_ARCAdapter_getEcrmNS() . ":P129.is_about"),
+				'o' => $triple['s'],
+				'o_type' => 'uri',
+			);
+			$hasSeen[$triple['s']] = 1;
+		}
+	}
+
+	return $toAdd;
+}
+
+
+function wisski_annotate_submit($form, &$form_state) {
+	$triples = wisski_str2triples($form['#post']['body']);
+	$mainns = "http://www8.informatik.uni-erlangen.de/IMMD8/Services/cidoc-crm/mapping/wisski/wisskibase.owl"; //"http://www8.informatik.uni-erlangen.de/IMMD8/Services/cidoc-crm/erlangen-crm_090330_5_0_1_TQ.owl";
+
+	$triples = wisski_convertTriplesFromRDFA($triples);
+
+
+	$toAddNow = array();
+    $outTriples = array();
+
+	$mainsubj = $triples[0]['s'];
+	$mainobj = "";
+
+	for($i=0; $i < count($triples); $i++) {
+
+		if(strcmp($triples[$i]['s'], $mainsubj) == 0) {
+			$toAddNow[] = $triples[$i];
+			if($triples[$i]['s'] == $mainsubj && $triples[$i]['p'] == 'http://www.w3.org/1999/02/22-rdf-syntax-ns#type') {
+      	$mainobj = $triples[$i]['o'];
+    	}
+
+		}
+		else
+			$outTriples[] = $triples[$i];
+	}
+
+	unset($_SESSION['storage']);
+	$_SESSION['storage']['ownTriples'] = array();
+	foreach($toAddNow as $triple) {
+			$_SESSION['storage']['ownTriples'][] = array('x' => $triple['s'], 'y' => $triple['p'], 'z' => $triple['o']);
+	}
+
+	$_SESSION['storage']['title'] = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($mainsubj);
+	$_SESSION['storage']['body'] = $form['#post']['body'];
+	$_SESSION['storage']['triples'] = $outTriples;
+	$_SESSION['storage']['annotatedTriples'] = array_merge($outTriples, $_SESSION['storage']['ownTriples']);
+	$_SESSION['storage']['step'] = 2;
+}
+
+
+
+function wisski_valuesToStorage($form, &$form_state) {
+	$form_state['storage']['title'] = $form_state['values']['title'];
+	$form_state['storage']['body'] = $form_state['values']['body'];
+	$form_state['storage']['triples'] = $form_state['values']['triples'];
+	$form_state['storage']['ownTriples'] = $form_state['values']['ownTriples'];
+}
+
+
+function wisski_deleteTripleButton($nid, $subj, $pred, $obj) {
+	$form = array();
+
+  $form['del' . $nid] = array(
+        '#type' => 'submit',
+        '#value' => 'erase',
+				'#name' => $nid,
+        '#arguments' => array($subj, $pred, $obj),
+        '#submit' => array('wisski_deleteTripleSubmit'),
+  );
+
+	return $form;
+}
+
+function wisski_deleteTripleSubmit($form, &$form_state) {
+	$subj = $form_state['clicked_button']['#arguments'][0];
+  $pred = $form_state['clicked_button']['#arguments'][1];
+  $objs = $form_state['clicked_button']['#arguments'][2];
+  wisski_store_getObj()->wisski_ARCAdapter_delTriple($subj, $pred, $objs);
+}
+
+
+/**
+ * Implementation of hook_form_alter().
+ *
+ * When first adding the node, put the 'Title' field on its own page in a
+ * multistep node form.  We need to do this in hook_form_alter() itself
+ * instead of a form_id-specific form alter so that we're likely to come after
+ * everyone else's alterings, e.g. taxonomy, menu, etc.
+ */
+ 
+function wisski_form_alter(&$form, $form_state, $form_id) {
+  if ($form_id == 'individual_node_form') {
+    $node = $form['#node'];
+		if( ($node->step != 2) && ($form_state['storage']['step'] != 2) )  {
+			wisski_step1($form, array('title', 'formular', 'instanceOf', 'instanceOfSelect', 'instanceOfAdd'), $form_state);
+    }
+    else {
+			if(empty($node->body)) {
+				$form['annotation']['body_field']['body']['#access'] = FALSE;
+				$form['annotation']['body_field']['#access'] = FALSE;
+				$form['annotation']['#access'] = FALSE;
+			}
+			$form['buttons']['submit']['#submit'][] = 'wisski_valuesToStorage';
+			$form['buttons']['submit']['#submit'][] = 'wisski_saveInstanceOfState';
+			$form['buttons']['submit']['#submit'][] = 'wisski_savePropertyState';
+      $form['buttons']['submit']['#submit'][] = 'wisski_node_form_final_submit';
+
+    }
+  }
+}
+
+/**
+ * Helper function to convert the node form into step 1 of a multi-step form.
+ *
+ * Marks all form elements to #access FALSE except those required on step 1,
+ * converts the usual "preview" button into a "next" button and hides the
+ * submit button.
+ */
+ 
+function wisski_step1(&$form, $notToHide, $form_state) {
+
+  // Hide all the elements we don't want on step 1.
+  foreach (element_children($form) as $child) {
+		if($child != 'buttons' 
+				&& (
+					empty($form[$child]['#type']) 
+					|| (
+						$form[$child]['#type'] != 'hidden' && 
+						$form[$child]['#type'] != 'value' && 
+						$form[$child]['#type'] != 'token'
+					)
+				) && !in_array($child, $notToHide) ) {
+    	$form[$child]['#access'] = FALSE;
+  	} else {
+
+			foreach(element_children($form[$child]) as $key) {
+				if($key != 'buttons'
+					&& (
+					empty($form[$child][$key]['#type']) 
+					|| (
+						$form[$child][$key]['#type'] != 'hidden' && 
+						$form[$child][$key]['#type'] != 'value' && 
+						$form[$child][$key]['#type'] != 'token'
+					)
+				) && !in_array($key, $notToHide) ) {
+					$form[$child][$key]['#access'] = FALSE;
+				}
+			}	
+		}
+	}
+
+  // Change preview to next and hide submit.
+  
+	$form['buttons']['preview'] = array(
+    '#type' => 'submit',
+    '#value' => t('Next'),
+    '#weight' => 50,
+    '#submit' => array('wisski_node_form_next_handler'),
+  );
+  
+	if(count($form_state['storage']['ownTriples']) == 0)
+		$form['buttons']['preview']['#access'] = FALSE;
+                
+	
+  $form['buttons']['submit']['#access'] = FALSE;
+}
+
+/**
+ * Submit handler for the 'Next' button on step 1.
+ *
+ * Saves the title value into $form_state['storage'].
+ */
+ 
+function wisski_node_form_next_handler($form, &$form_state) {
+  if (isset($form_state['values']['title']) && $form_state['values']['title'] != '') {
+    $form_state['storage']['title'] = $form_state['values']['title'];
+  }
+
+	if (isset($form_state['values']['body']) && $form_state['values']['body'] != '') {
+		$form_state['storage']['body'] = $form_state['values']['body'];	
+	}
+	$form_state['storage']['step'] = 2;
+
+}
+
+
+/**
+ * Submit handler for the "Save" button on step 2.
+ *
+ * Clears out $form_state['storage']['title'] so the form will submit and will
+ * not rebuild itself.
+ */
+ 
+function wisski_node_form_final_submit($form, &$form_state) {
+	$node = $form_state['values']['node'];
+	
+	$outTriples = array();
+	foreach($form_state['storage']['ownTriples'] as $triple) {
+		// TODO: Hier Literals verarbeiten! Immer wenn String, int ... dann literal!
+		$trip = array();
+		$trip['s'] = $triple['x'];
+		$trip['s_type'] = "uri";
+		$trip['p'] = $triple['y'];
+		$trip['o'] = $triple['z'];
+		$trip['o_type'] = "uri";
+		$outTriples[] = $trip;
+	}
+
+	wisski_store_getObj()->wisski_ARCAdapter_getStore()->insert($outTriples, wisski_store_getObj()->wisski_ARCAdapter_graphName(), FALSE);
+	
+	$tr = $form_state['values']['triples'];
+
+	if(isset($tr)) {
+
+  wisski_store_getObj()->wisski_ARCAdapter_getStore()->insert($tr, wisski_store_getObj()->wisski_ARCAdapter_graphName(), FALSE);
+		foreach($tr as $triple) {
+
+			wisski_store_addNodeForTriple($triple);
+  	}
+	}
+
+	unset($form_state['storage']['title']);
+	unset($form_state['storage']['instanceOf']);
+	unset($form_state['storage']);
+
+}
+
+
+/**
+* Here the access can be allowed or disallowed 
+* @author: Mark Fichtner
+* @return: Returns true or false
+*/
+
+function wisski_access($op, $node, $account) {
+
+  if ($op == 'create') {
+    return user_access('wisski create node', $account);
+  }
+
+  if ($op == 'update') {
+    if (user_access('wisski edit any node', $account) || (user_access('wisski edit own node', $account) && ($account->uid == $node->uid))) {
+      return TRUE;
+    }
+  }
+
+  if ($op == 'delete') {
+    if (user_access('wisski delete any node', $account) || (user_access('wisski delete own node', $account) && ($account->uid == $node->uid))) {
+      return TRUE;
+    }
+  }
+
+}
+
+/**
+* The function that is called, when the node is viewed. Currently
+* this is not used.
+* @author: Mark Fichtner
+* @return: Returns the modified node to be viewed
+*/
+
+function wisski_view($node, $teaser = FALSE, $page = FALSE) {
+	
+  $node = node_prepare($node, $teaser);
+
+	if (module_exists('rdfaify') && $node->type == "individual") {
+		_rdfaify_execute($node);
+  }
+  
+  if (!module_exists('wisskiTemplate')) {
+
+	$out = array();
+	$type = "";
+  if(sizeof(wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type')) > 0) {
+    $returned = wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type');
+    $type = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($returned[0]);
+  }
+	
+	if($type != NULL) {
+		$upperClasses = wisski_store_getObj()->wisski_ARCAdapter_getUpperClasses($type);
+		
+		$properties = array();
+		foreach ($upperClasses as $class) {
+
+			$prop = wisski_store_getObj()->wisski_ARCAdapter_getPropertiesForDomain($class);
+
+			foreach ($prop as $p) {
+				if(!in_array($p, $properties)) {
+					$properties[] = $p;
+				}
+			}
+		}
+
+		for($i = 0; $i < count($properties); $i++) {
+			$propTypes = "";
+
+			$returned = wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, $properties[$i]);
+
+			if(count($returned) > 0) {
+
+	   		foreach ($returned as $prop) {
+					$propTypes .= wisski_store_getObj()->wisski_ARCAdapter_addNamespace($prop);
+					$propTypes .= ", ";
+				}
+				$propTypes = substr($propTypes, 0, strlen($propTypes) - 2);
+				$out[] = array($properties[$i], $propTypes); 
+			}
+
+		}	
+	}
+
+	$node->content['ARC'] = array(
+    '#value' => theme('table', array('Filled Property', 'Value(s)'), $out), 
+    '#weight' => 1,
+  );
+  }
+
+  
+
+  return $node;
+}
+
+/**
+* The function that is called, when a node is inserted
+* This can be used for postprocessing e.g. inserting the nodes data in ARC 
+* @author: Mark Fichtner
+* @return: Returns nothing
+*/
+
+function wisski_insert(&$node) {
+
+  if(module_exists("path")) {
+		path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
+		$node->path = "content/" . wisski_store_makePathTitle($node->title);
+	}
+}
+
+/**
+* The function that is called, when a node is deleted.
+* This can be used for postprocessing 
+* @author: Mark Fichtner
+* @return: Returns nothing
+*/
+
+function wisski_delete(&$node) {
+  wisski_delNode($node->nid);
+}
+
+function wisski_update(&$node) {
+
+	if(module_exists("path")) {
+    path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
+		$node->path = "content/" . wisski_store_makePathTitle($node->title);
+	}
+}
+
+
+
+/**
+* The permissions can be built here
+* @author: Mark Fichtner
+* @return: Returns an array of permissionstrings
+*/
+
+function wisski_perm() {
+	return array('wisski access view', 'wisski access triples', 'wisski access network', 'wisski access xml', 'wisski access delete', 
+	  'wisski create node', 'wisski edit any node', 'wisski edit own node', 'wisski delete any node', 'wisski delete own node');
+}
+
+function wisski_formular2() {
+	return drupal_get_form('wisski_form');
+}
+
+/**
+* This function allows additional menus. E.g. the tabs are built like that.
+* @author: Mark Fichtner
+* @return: Returns an array of menu-items
+*/
+
+function wisski_menu() {
+
+  $items = array();
+
+	$items['georg'] = array(
+    'title' => 'WissKIGEORG',
+    'page callback' => 'wisski_georg',
+    'access arguments' => array('wisski access view'),
+    'type' => MENU_CALLBACK
+  );
+
+	// The following three items are the tabs inside our nodes
+  $items['node/%node/triples'] = array(
+   	'title'    => t('Triples'),
+    'page callback' => 'wisski_showTriples',
+    'page arguments' => array(1),
+		'access callback' => 'wisski_loader',
+		'access arguments' => array(1, 'wisski access triples'),
+		'type'     => MENU_LOCAL_TASK,
+
+  );
+
+	$items['node/%node/network'] = array(
+   	'title'    => t('Network'),
+    'page callback' => 'wisski_showNetwork',
+    'page arguments' => array(1),
+    'access callback' => 'wisski_loader',
+    'access arguments' => array(1, 'wisski access network'),
+		'type'     => MENU_LOCAL_TASK,
+  );
+
+	$items['node/%node/xml'] = array(
+   	'title'    => t('XML'),
+    'page callback' => 'wisski_showXML',
+    'page arguments' => array(1),
+    'access callback' => 'wisski_loader',
+    'access arguments' => array(1, 'wisski access xml'),
+		'type'     => MENU_LOCAL_TASK,
+  );
+
+		$items['node/%node/delete'] = array(
+   	'title'    => t('Delete'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('wisski_delNodeQuestion'),
+    'access callback' => 'wisski_loader',
+    'access arguments' => array(1, 'wisski access delete'),
+		'type'     => MENU_LOCAL_TASK,
+  );
+
+  // by martin scholz  
+	$items['admin/settings/wisski/uids'] = array(
+   	'title'    => t('Unique IDs'),
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('wisski_uids_admin_page'),
+		'type'     => MENU_LOCAL_TASK,
+		'access arguments' => array('wisski administrate page'),
+  );
+
+	$items['wisski/uids/%'] = array(
+   	'title'    => t('ID Generator'),
+    'page callback' => 'wisski_printUIDs',
+    'page arguments' => array(2),
+		'type'     => MENU_CALLBACK,
+  );
+
+
+	return $items;
+}
+
+function wisski_delNodeQuestion() {
+	return confirm_form($form, 
+    	t('Are you sure you want to delete this node?'),
+    	isset($_GET['destination']) ? $_GET['destination'] : '',
+    	t('This action cannot be undone.'),
+    	t('Delete'),
+    	t('Cancel'));
+	
+	  $form['wisski_delNodeNow'] = array(
+        '#type' => 'submit',
+    	'#value' => 'Yes I want to delete this node.',
+    	'#submit' => array('wisski_delNode'),
+  	);
+
+	return $form;
+
+}
+
+function wisski_delNodeQuestion_submit($nix, $nox) {
+  node_delete(arg(1));
+  drupal_goto('<front>');
+}
+
+
+function wisski_delNode($nodenr) {
+
+	$node = node_load($nodenr);
+
+	path_set_alias('node/' . $node->nid);
+	
+	if($node->type != "individual")
+	  return;
+	
+  $triples = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForSubject($node->title);
+  $triples2 = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForObject($node->title);
+	if(!empty($triples))
+  foreach($triples as $triple) {
+		wisski_store_getObj()->wisski_ARCAdapter_delTriple( wisski_store_getObj()->wisski_ARCAdapter_delNamespace($node->title), $triple['p'], $triple['o']);
+	}
+
+  if(!empty($triples2))	
+	foreach($triples2 as $triple) {
+	  wisski_store_getObj()->wisski_ARCAdapter_delTriple( $triple['s'], $triple['p'], wisski_store_getObj()->wisski_ARCAdapter_delNamespace($node->title));
+	}
+
+}
+
+/**
+* This function is required to show the tabs only in our nodes and not in
+* any other nodes.
+* @author: Mark Fichtner
+* @return: Returns true or false (tabs should be loaded or not)
+*/
+function wisski_loader($node, $req_permission = 'wisski node access') {
+
+	if($node->type == 'property' || $node->type == 'individual' || $node->type == 'class')
+		if(user_access($req_permission)) 
+		  return TRUE;
+	return FALSE;
+}
+
+/**
+* The function that is called if the tab with the label 'triples'
+* is clicked
+* @author: Mark Fichtner
+* @return: Returns a string that should be shown
+*/
+
+function wisski_showTriples($node) {
+	$namespaces = wisski_store_getObj()->wisski_ARCAdapter_getNamespaces();
+
+	$listIN = array();
+
+  /* Store all triples for image-generation
+   * triples have to be an array consisting of:
+   * "s": the subject, "s_type": the type: "uri", "bnode" or "var"
+   * "p": the predicate,
+   * "o": the object, "o_type": "uri", "bnode", "literal", or "var"
+   * "o_datatype": a datatype, "o_lang": the language e.g. "en-us"
+   */
+
+  $triples = array();
+
+	if ( $rows = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForObject($node->title) ) {
+      foreach ($rows as $row) {
+      // l() generates links (param1: name to be displayed, param2: where the link goes)
+      // t() is a printer
+
+      // We need a subject and a predicate
+      $subject = "";
+
+      // if the subjects type is URI then it should be displayed as a link
+      if($row['s type'] == "uri") {
+        $path = drupal_lookup_path("source", 'content/' . wisski_store_makePathTitle(wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['s'])));
+        $subject = l(t("@subj", array('@subj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['s']))), $path . '/triples');
+      }
+      else if($row['s type'] == "bnode") // if it is a bnode, it is linked, too. Later this should be changed to a better representation
+        $subject = t("@subj", array('@subj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['s'])));
+      else // if it is not - then display it as test
+        $subject = t("@subj", array('@subj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['s'])));
+
+      $predicate = "";
+
+      if($row['p type'] == "uri")
+      	$predicate = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+			else if($row['p type'] == "bnode")
+        $predicate = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+      else
+        $predicate = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+ 
+  	  $listIN[] = array($subject, $predicate);
+    }
+  }
+
+	$list = array();
+
+	if ($rows = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForSubject($node->title) ) {
+
+      foreach ($rows as $row) {
+
+      // l() generates links (param1: name to be displayed, param2: where the link goes)
+      // t() is a printer
+
+      // We need a subject and a predicate
+      $subject = "";
+
+      // if the subjects type is URI then it should be displayed as a link
+      if($row['p type'] == "uri")
+        $subject = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+      else if($row['p type'] == "bnode") // if it is a bnode, it is linked, too. Later this should be changed to a better representation
+        $subject = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+      else // if it is not - then display it as text
+        $subject = t("@pred", array('@pred' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['p'])));
+
+      $obj = "";
+
+      if($row['o type'] == "uri") {
+        $path = drupal_lookup_path("source", 'content/' .wisski_store_makePathTitle(wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o'])));
+
+        $obj = l(t("@obj", array('@obj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o']))), $path . '/triples');
+      }
+      else if($row['o type'] == "bnode")
+        $obj = t("@obj", array('@obj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o'])));
+      else
+        $obj = t("@obj", array('@obj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o'])));
+
+      $list[] = array($subject, $obj);
+    }
+  }
+
+	return theme('table', array('Incoming Subject', 'Incoming Predicate'), $listIN) .
+				 theme('table', array('Outgoing predicate', 'Outgoing Object'), $list); 
+}
+
+
+/**
+* This function paints the image with graphviz if 'network' is clicked
+* @author: Mark Fichtner
+* @return: Returns the image
+*/
+
+function wisski_showNetwork($node) {
+	$namespaces = wisski_store_getObj()->wisski_ARCAdapter_getNamespaces();
+	$configvis = array(
+  	// path to dot 
+  	'graphviz_path' =>  variable_get('wisski_graphviz', '/usr/bin/dot'),
+  	// tmp dir (default: '/tmp/') 
+  	'graphviz_temp' => variable_get('wisski_graphviztmp', '/srv/www/htdocs/wisski/sites/all/modules/wisski/arc/tmp/'),
+  	// pre-defined namespace prefixes (optional) 
+  	'ns' => $namespaces
+	);
+
+  $vis = ARC2::getComponent('TriplesVisualizerPlugin', $configvis);
+
+	$triples = wisski_store_getObj()->wisski_Store_buildTriples($node);
+
+        foreach($triples as $key => $triple) {
+          $triples[$key] = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($triple);
+        }
+
+	// lets make the nodes less big by using the namespaces correctly.
+	$image = $vis->draw($triples, 'png', 'base64');
+	return '<img src="data:image/png;base64,' . $image . '" width="100%"/>'; // height="100%"/>';
+
+}
+
+/**
+* This is called if 'xml' is clicked
+* @author: Mark Fichtner
+* @return: Returns the xml view of a node
+*/
+
+function wisski_showXML($node) {
+	$store = wisski_store_getObj()->wisski_ARCAdapter_getStore();
+  $doc = $store->toRDFXML(wisski_store_getObj()->wisski_Store_buildTriples($node, 1));
+	
+	$doc = htmlentities($doc);
+	$doc = str_replace("\n", "<br>", $doc);
+	
+  return t($doc);
+}
+
+function wisski_georg() {
+  return "<p> Georg ist der tollste </p>";
+}
+
+
+
+/* Returns an array of system-wide unique IDs for default counter.*/
+function wisski_get_uids($amount = 1) {
+  return wisski_get_uids_from_counter('<default>', $amount);
+}
+
+
+/* Returns a system-wide unique ID for default counter.*/
+function wisski_get_uid() {
+  $ids = wisski_get_uids_from_counter('<default>', 1);
+  return $ids[0];
+}
+
+
+/**Returns an array of system-wide unique IDs for a specific counter.
+* 
+* Version with MySQL LOCK TABLES synchronization
+*/
+function wisski_get_uids_from_counter($counter = '<default>', $amount = 1) {
+
+  if (variable_get('wisski_use_uuids', 0) == 0) {
+    return _wisski_get_counter_uids($counter, $amount);
+  } else {
+    return _wisski_get_uuid_uids($amount);
+  }
+
+}
+
+
+/**
+* Generates a UUID 4.
+*/
+function _wisski_get_uuid_uids($amount) {
+
+  $ids = array();
+
+  while ($amount-- > 0) {
+    
+    $ids[] = sprintf("%04x%04x-%04x-%03x4-%04x-%04x%04x%04x",
+      mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF),
+      mt_rand(0, 0xFFFF),
+      mt_rand(0, 0xFFF),
+      (mt_rand(0, 0x3FFF) | 0x8000),  // set highest two bits to 10
+      mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF), mt_rand(0, 0xFFFF)
+    );
+
+  }
+
+  return $ids;
+
+}
+
+
+/*Return a UUID. It is of type $type.
+* According to $type, $arg1 and $arg2 must be given.
+* 
+*/
+function wisski_get_uuid($type = 4, $arg1 = NULL, $arg2 = NULL) {
+  
+  //TODO type support, usage of druuid
+  if ($type == 4) {
+    $a = _wisski_get_uuid_uids(1);
+    return $a[0];
+  }
+  drupal_set_message("UUID type not supported: $type. Returning type 4", 'error');
+  $a = _wisski_get_uuid_uids(1);
+  return $a[0];
+
+}
+
+
+function _wisski_get_counter_uids($counter, $amount) {
+
+  $cs = array('0'=>'1','1'=>'2','2'=>'3','3'=>'4','4'=>'5','5'=>'6','6'=>'7','7'=>'8','8'=>'9','9'=>'a','a'=>'b','b'=>'c','c'=>'d','d'=>'e','e'=>'f','f'=>'0');
+  $ids = array();
+  db_lock_table("wisski_uids");
+  $res = db_query("SELECT state FROM {wisski_uids} WHERE counter='%s'", $counter);
+  $res = db_fetch_array($res);
+  if (! isset($res)) $res = '0';
+  $id = $res['state'];
+  while ($amount-- > 0) {
+    $ids[] = sprintf("%04s", $id);
+    for ($i = strlen($id) - 1;; $i--) {
+      if ($i == -1) {
+        $id = "1" . $id;
+        break;
+      }
+      $id = substr_replace($id, $cs[substr($id, $i, 1)], $i, 1);
+      if (substr($id, $i, 1) != '0') {
+        break;
+      }
+    }
+  }
+  db_query("UPDATE {wisski_uids} SET state='%s' WHERE counter='%s'", $id, $counter);
+  db_unlock_tables();
+  
+  return $ids;
+  
+}
+
+
+
+function _wisski_returnTRUE () { return TRUE; }
+
+
+function wisski_printUIDs ($amount) {
+ 
+  $ids = wisski_getUIDs($amount);
+
+  foreach ($ids as $id) {
+    print "$id\n";
+  }
+
+}
+
+function wisski_uids_admin_page () {
+  $form = array ();
+  $form['wisski_uids_comment'] = array(
+    '#value' => t('UIDs are used within the WissKI system for manyfold purposes whenever a system-wide unique identifier is required, particularly for the creation of content URIs. UIDs are generated by using a counter. Reset the counter appropriately to avoid name clashes if you set up a non-empty system.'),
+  );
+  $form['wisski_uids_amount'] = array (
+    '#type' => 'textfield',
+    '#title' => t('Number of steps to increase counter'),
+    '#description' => t('You can increase the standard counter an arbitrary number of steps. The last ID is displayed only and is of no use. Use this to reset the counter to a higher value or to get the current counter state. This is helpful especially/only when migrating or resetting the system.'),
+    '#default_value' => "0",
+    '#size' => 100,
+    '#maxlength' => 255,
+    '#required' => FALSE,
+    '#disabled' => variable_get('wisski_use_uuids', 0),
+  );
+  $form['wisski_use_uuids'] = array(
+    '#type' => 'checkbox',
+    '#title' => t('Use UUIDs instead of counter-generated UIDs'),
+    '#default_value' => variable_get('wisski_use_uuids', 0),
+    '#return_value' => 1,
+  );
+
+  $form['wisski_uids_submit'] = array (
+    '#type' => 'submit',
+    '#value' => t('Save settings'),
+  );
+
+
+
+  return $form;
+
+}
+
+
+function wisski_uids_admin_page_submit ($form, $form_state) {
+
+  variable_set('wisski_use_uuids', $form_state['values']['wisski_use_uuids']);
+  
+  $a = $form_state['values']['wisski_uids_amount'];
+  if ($a > 0) {
+    $ids = wisski_get_uids($a);
+    drupal_set_message(t("counter increased by %steps, last UID is %uid", array('%steps' => $a, '%uid' => end($ids))));
+  }
+
+}
+
+
+
+function wisski_prefix_msgs($prefix, $msgs) {
+  return array_map(function($a, $b) { return $a . ': ' . $b; }, array_fill(0, count($msgs), $prefix), $msgs);
+}
+
+
+function wisski_set_msgs($prefix, $msgs) {
+  foreach (wisski_prefix_msgs($prefix, $msgs) as $msg) drupal_set_message($msg, 'error');
+}
+
+
+function wisski_helper_delete_template(&$form_state) {
+  
+  global $base_root, $base_path;
+
+  $args = func_get_args();
+  array_shift($args);
+  $name = array_shift($args);
+  $cancel_redirect = array_shift($args);
+  $delete_redirect = array_shift($args);
+  $delete_callback = array_shift($args);
+
+  $form['text'] = array(
+    '#prefix' => '<div>',
+    '#value' => t('Do you really want do delete %name? This action cannot be undone!', array('%name' => $name)),
+    '#suffix' => '</div>',
+  );
+  $form['buttons'] = array(
+    '#prefix' => '<div>',
+    '#suffix' => '</div>',
+  );
+  $form['buttons']['delete'] = array(
+    '#type' => 'submit',
+    '#value' => t('Delete'),
+  );
+  $form['buttons']['cancel'] = array(
+    '#prefix' => '<a href="' . $base_root . $base_path . $cancel_redirect . '">',
+    '#value' => t('Cancel'),
+    '#suffix' => '</a>',
+  );
+
+  $form_state['storage']['name'] = $name;
+  $form_state['storage']['delete_callback'] = $delete_callback;
+  $form_state['storage']['delete_redirect'] = $delete_redirect;
+  $form_state['storage']['delete_args'] = $args;
+  
+  return $form;
+
+}
+
+
+function wisski_helper_delete_template_submit($form, &$form_state) {
+  
+  $s = $form_state['storage'];
+  
+  if (call_user_func_array($s['delete_callback'], $s['delete_args'])) {
+    drupal_set_message(t("!name deleted successfully.", array('!name' => $s['name'])));
+  } else {
+    drupal_set_message(t('!name could not be deleted'), array('!name' => $s['name']));
+  }
+
+  $form_state['redirect'] = $s['delete_redirect'];
+  drupal_goto($s['delete_redirect']);
+  
+}
+

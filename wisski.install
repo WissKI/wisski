@@ -1,0 +1,130 @@
+<?php
+// $Id$
+
+function wisski_uninstall() {
+  $menu_ids = variable_get("wisski_menu_ids", array());
+  $node_ids = variable_get("wisski_node_ids", array());
+  
+  if(!empty($menu_ids))
+    foreach($menu_ids as $menu_id)
+      menu_link_delete($menu_id);
+  
+  if(!empty($node_ids))
+    foreach($node_ids as $node_id)
+      node_delete($node_id);
+
+  drupal_uninstall_schema('wisski');
+  
+}
+
+function wisski_install() {
+  drupal_install_schema('wisski');
+  db_query("INSERT INTO {wisski_uids} () VALUES()");
+  
+  $menu_ids = array();
+  $node_ids = array();
+  
+  global $base_path;  
+  $wnode = new stdClass();
+  $wnode->type = 'page';
+  $wnode->title = "Welcome";
+  $wnode->body = "<div style=\"display:block;height:370px;background:url('" . $base_path . "/sites/all/themes/blendedmalts/pics/img_welcome.png') center no-repeat;\"></div>";
+  $wnode->uid = 1;
+  $wnode->format = FILTER_HTML_ESCAPE;
+  $wnode->status = 1;
+  $wnode->promote = 1;
+  node_save($wnode);
+  
+  $node_ids[] = $wnode->nid;
+  variable_set('site_frontpage', "node/" . $wnode->nid);
+  
+  $anode = new stdClass();
+  $anode->type = 'page';
+  $anode->title = "About us";
+  $anode->body = '<p>The WissKI Project is funded by the German Research Foundation (Deutsche Forschungsgemeinschaft, DFG) from 2009 to 2011.</p> <p>Partner Institutions</p> <ul>     <li>Friedrich-Alexander-University of Erlangen-Nuremberg (FAU), Chair of Computer Science 8 Artificial Intelligence</li>     <li>Germanisches Nationalmuseum (GNM) Nuremberg, Head of Museum Informatics</li>     <li>Zoologisches Forschungsmuseum Alexander Koenig (ZFMK) Bonn, Head of Biodiversity Informatics</li> </ul> <p>Staff</p> <ul>     <li>Prof. Dr. Guenther Goerz<br />Chair of Computer Science 8: Artificial Intelligence, University of Erlangen-Nuremberg, Germany</li>     <li>Martin Scholz Dipl.-Inf.<br />Computer Science Department 8: Artificial Intelligence, University of Erlangen-Nuremberg, Germany</li>     <li>Dr. Karl-Heinz Lampe<br />Workgroup Chair, Head of Biodiversity Informatics and of Dept. Arthropoda, Zoologisches Forschungsmuseum Alexander Koenig, Bonn, Germany</li>     <li>Mark Fichtner Dipl.-Inf.<br />Biodiversity Informatics, Zoologisches Forschungsmuseum Alexander Koenig (ZFMK), Bonn, Germany</li>     <li>Dr. Siegfried Krause<br />Workgroup Co-Chair, Head of the Department for Cultural and Museum Informatics, Germanisches Nationalmuseum, Nuremberg, Germany</li>     <li>Georg Hohmann M.A.<br />Department for Cultural and Museum Informatics, Germanisches Nationalmuseum, Nuremberg, Germany</li> </ul>';
+  $anode->format = FILTER_HTML_ESCAPE;
+  $anode->uid = 1;
+  $anode->status = 1;
+  $anode->promote = 1;
+  node_save($anode);
+  
+  $node_ids[] = $anode->nid;
+
+  $item = wisski_get_item();  
+  $item['link_path'] = ("<front>");
+  $item['link_title'] = t("Home");  
+  $menu_ids[] = menu_link_save(&$item);
+
+  $item = wisski_get_item();
+  $item['link_path'] = ("node/" . $anode->nid);
+  $item['link_title'] = t("About us");
+  $item['weight'] = -49;  
+  $menu_ids[] = menu_link_save(&$item);
+  
+  if(module_exists("contact")) {
+    $item = wisski_get_item();
+    $item['link_path'] = "contact";
+    $item['link_title'] = t("Contact");
+    $item['weight'] = -48;  
+    $menu_ids[] = menu_link_save(&$item);
+  }
+  
+  $item = wisski_get_item();
+  $item['link_path'] = "user/login";
+  $item['link_title'] = t("Login");
+  $item['weight'] = -47;  
+  $menu_ids[] = menu_link_save(&$item);
+  
+  $item = wisski_get_item();
+  $item['link_path'] = "logout";
+  $item['link_title'] = t("Logout");
+  $item['weight'] = -46;  
+  $menu_ids[] = menu_link_save(&$item);
+    
+  $item = wisski_get_item();
+  $item['menu_name'] = "secondary-links";
+  $item['link_path'] = "node/add";
+  $item['link_title'] = t("Create");
+  $item['weight'] = -48;  
+  $menu_ids[] = menu_link_save(&$item);
+  
+  variable_set("wisski_menu_ids", $menu_ids);
+  variable_set("wisski_node_ids",$node_ids);
+
+}
+
+function wisski_get_item() {
+  $item = array();
+  $item['menu_name'] = "primary-links";
+  $item['weight'] = -50;
+  $item['expanded'] = 0;
+  $item['options'] = array();
+  $item['hidden'] = 0;
+  $item['mlid'] = NULL;
+  $item['plid'] = 0;
+  return $item;
+}
+
+function wisski_schema() {
+  $schema['wisski_uids'] = array(
+    'description' => 'Table for WissKI\'s ID Generator',
+    'fields' => array(
+      'counter' => array(
+        'type' => 'varchar',
+        'length' => 16,
+        'not null' => TRUE,
+        'default' => '<default>'
+      ),
+      'state' => array(
+        'type' => 'varchar',
+        'length' => 25, // 16^25 should be enough ids
+        'not null' => TRUE,
+        'default' => '0'
+      )
+    ),
+    'unique_keys' => array ('counter' => array('counter'))
+  );
+  return $schema;
+
+}
+

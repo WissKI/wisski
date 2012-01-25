@@ -1,0 +1,6 @@
+; $Id$
+name = WissKI
+description = A scientific module for editing and displaying of ontologies in OWL-DL.
+core = 6.x
+package = "WissKI"
+dependencies[] = wisski_store
