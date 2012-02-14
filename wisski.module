@@ -719,7 +719,7 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
 		_rdfaify_execute($node);
   }
   
-  if (!module_exists('wisskiTemplate')) {
+  if (!module_exists('wisski_pathbuilder')) {
 
 	$out = array();
 	$type = "";
