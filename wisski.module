@@ -1092,12 +1092,16 @@ function wisski_showNetwork($node) {
 
 function wisski_showXML($node) {
 	$store = wisski_store_getObj()->wisski_ARCAdapter_getStore();
-  $doc = $store->toRDFXML(wisski_store_getObj()->wisski_Store_buildTriples($node, 1));
+  $triples = wisski_store_getObj()->wisski_Store_buildTriples($node, 1);
 	
-	$doc = htmlentities($doc);
-	$doc = str_replace("\n", "<br>", $doc);
-	
-  return t($doc);
+  $conf = array('ns' => wisski_store_getObj()->wisski_ARCAdapter_getNamespaces());
+  $ser = ARC2::getRDFXMLSerializer($conf);
+
+  $doc = $ser->getSerializedTriples($triples);
+  
+  drupal_set_header('Content-Type: application/rdf+xml; charset=utf-8');
+
+  print $doc;
 }
 
 function wisski_georg() {
