@@ -19,7 +19,13 @@ function wisski_uninstall() {
 
 function wisski_install() {
   drupal_install_schema('wisski');
-  db_query("INSERT INTO {wisski_uids} () VALUES()");
+
+  $dbtype = $GLOBALS['db_type'];
+
+  if($dbtype == 'pgsql')
+    db_query("INSERT INTO {wisski_uids} DEFAULT VALUES");
+  else
+    db_query("INSERT INTO {wisski_uids} () VALUES()");
   
   $menu_ids = array();
   $node_ids = array();
