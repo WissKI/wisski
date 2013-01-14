@@ -68,7 +68,17 @@ function wisski_node_info() {
 */
 
 function wisski_form(&$node, $form_state) {
-	
+
+//drupal_set_message(serialize($node));
+
+//drupal_set_message(serialize($form_state));
+
+        //$type = node_get_types('type', $node);
+        //if ($type->&gt;has_title) {
+
+        if($node->type != "individual")
+          return "";
+
 	$form['node'] = array(
 	    '#type' => 'value',
 			'#value' => $node,
@@ -780,7 +790,7 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
 */
 
 function wisski_insert(&$node) {
-
+//  drupal_set_message("Insert called!");
   if(module_exists("path")) {
 		path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
 		$node->path = "content/" . wisski_store_makePathTitle($node->title);
@@ -799,11 +809,20 @@ function wisski_delete(&$node) {
 }
 
 function wisski_update(&$node) {
-
-	if(module_exists("path")) {
-    path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
-		$node->path = "content/" . wisski_store_makePathTitle($node->title);
-	}
+  $title = $node->title;
+  if(empty($title)) {
+    $realnode = $node->node;
+    $title = $realnode->title;
+  }
+//  drupal_set_message("Update called! " . serialize($node));
+//  drupal_set_message("title: " . $title);
+  module_load_include('module', 'wisski_store', 'wisski_store');
+//  drupal_set_message("path: " . "content/" . wisski_store_makePathTitle($title));
+  if(module_exists("path")) {
+    path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($title));
+		$node->path = "content/" . wisski_store_makePathTitle($title);
+  }
+  
 }
 
 
@@ -968,7 +987,7 @@ function wisski_loader($node, $req_permission = 'wisski node access') {
 
 function wisski_showTriples($node) {
 	$namespaces = wisski_store_getObj()->wisski_ARCAdapter_getNamespaces();
-
+  //drupal_set_message(serialize(wisski_store_getObj()->config));
 	$listIN = array();
 
   /* Store all triples for image-generation
@@ -979,6 +998,20 @@ function wisski_showTriples($node) {
    * "o_datatype": a datatype, "o_lang": the language e.g. "en-us"
    */
 
+  $store = wisski_store_getObj()->wisski_ARCAdapter_getStore();
+/*
+  drupal_set_message(serialize($store));
+
+  $values = $store->query("SELECT * WHERE { ?s ?p ?o } LIMIT 1000", 'rows');
+  
+  drupal_set_message("values ist: " . serialize($values));
+
+  foreach($values as $value) {
+    drupal_set_message(" got a value: " . serialize($value));
+  }
+  
+  drupal_set_message(serialize($store->getErrors()));
+*/
   $triples = array();
 
 	if ( $rows = wisski_store_getObj()->wisski_ARCAdapter_getTriplesForObject($node->title) ) {
@@ -1336,4 +1369,15 @@ function wisski_helper_delete_template_submit($form, &$form_state) {
   drupal_goto($s['delete_redirect']);
   
 }
+
+//function wisski_forms($form_id, $args) {
+//  drupal_set_message(serialize($form_id));
+//  drupal_set_message(serialize($args));
+/*  $forms['individual_node_form'] = array(
+    'callback' => 'wisski_form',
+    'callback arguments' => $args
+  );
+ */             
+//  return $forms;
+//}
 
