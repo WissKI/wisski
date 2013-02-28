@@ -724,22 +724,8 @@ function wisski_access($op, $node, $account) {
 function wisski_view($node, $teaser = FALSE, $page = FALSE) {
 	
   $node = node_prepare($node, $teaser);
-  
-  // added by Martin: return site content to make content accessible to Drupal search
-  if ($node->type == "individual" && module_exists('wisski_pathbuilder')) {  
-    $block2 = module_invoke('wisski_pathbuilder', 'block', 'view', 0);
-    $block1 = module_invoke('wisski_pathbuilder', 'block', 'view', 1);
-    $content = '<div id="wki-content-right">' . $block2['content'] . '</div>' . '<div id="wki-content-left">' . $block1['content'] .  '</div>';
 
-    $node->content['all'] = array(
-      '#value' => $content,
-    );
-    return $node;
-  }
-  // end add
-
-
-  if (module_exists('rdfaify') && $node->type == "individual") {
+	if (module_exists('rdfaify') && $node->type == "individual") {
 		_rdfaify_execute($node);
   }
   
@@ -1089,7 +1075,7 @@ function wisski_showTriples($node) {
       else if($row['o type'] == "bnode")
         $obj = t("@obj", array('@obj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o'])));
       else
-        $obj = t("@obj", array('@obj' => wisski_store_getObj()->wisski_ARCAdapter_addNamespace($row['o'])));
+        $obj = t("@obj", array('@obj' => $row['o']));
 
       $list[] = array($subject, $obj);
     }
