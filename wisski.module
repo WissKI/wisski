@@ -59,6 +59,23 @@ function wisski_node_info() {
 }
 
 
+function wisski_nodeapi(&$node, $op) {
+
+  if ($node->type != 'individual') return;
+
+  if ($op == 'search result' && module_exists('wisski_pathbuilder')) {
+    
+    module_load_include('inc', 'wisski_pathbuilder');
+    $inst = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($node->title);
+    if (!$inst) return;
+    $gid = wisski_pathbuilder_getGroupIDForIndividual($inst);
+    if ($gid == -1) return;
+    $node->title = wisski_pathbuilder_generateGroupName($inst, $gid);
+    
+  }
+}
+
+
 /**
 * Add the input forms that should be displayed when the edit-button or the
 * add-button is clicked.
