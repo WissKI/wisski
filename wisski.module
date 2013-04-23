@@ -952,8 +952,27 @@ function wisski_menu() {
 		'type'     => MENU_CALLBACK,
   );
 
+  // add visual settings dialog
+  $items['admin/settings/wisski/visual'] = array(
+    'title' => 'Visual Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('wisski_visualSettings'),
+    'type' => MENU_LOCAL_TASK,
+    'access arguments' => array('wisski access templateEdit'),
+  );
 
-	return $items;
+
+  return $items;
+}
+
+function wisski_visualSettings() {
+  $form = array ();
+  $form['wisski_comment'] = array(
+    '#value' => t('Here you can toggle the view of many WissKI elements like search lists and navigation menus.'),
+    '#weight' => -10,
+  );
+  
+  return $form;
 }
 
 function wisski_delNodeQuestion() {
