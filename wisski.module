@@ -969,10 +969,10 @@ function wisski_visualSettings() {
   $form = array ();
   $form['wisski_comment'] = array(
     '#value' => t('Here you can toggle the view of many WissKI elements like search lists and navigation menus.'),
-    '#weight' => -10,
+    '#weight' => -100,
   );
   
-  return $form;
+  return system_settings_form($form);
 }
 
 function wisski_delNodeQuestion() {
