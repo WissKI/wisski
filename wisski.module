@@ -1439,3 +1439,41 @@ function wisski_helper_delete_template_submit($form, &$form_state) {
 //  return $forms;
 //}
 
+
+/* Extract the query arguments for a request from http parameters
+*
+* Provide an array $query of arguments with default values.
+* If an argument is found, it will be set in $query.
+* 
+* @return an array with all parameters found (not only those defined in $query)
+*
+* The parameters can be encoded as http params. If $param is NULL it will parse
+* the request body (if present)
+*
+* @author Martin Scholz
+*
+*/
+function wisski_parse_http_params(&$query, $param = NULL) {
+  
+  $q = NULL;
+
+  if ($param !== NULL && isset($_POST[$param])) {
+    $q = $_POST[$param];
+  } elseif ($param !== NULL && isset($_GET[$param])) {
+    $q = $_GET[$param];
+  } elseif ($param === NULL) {
+    $q = file_get_contents("php://input");
+  }
+
+  if (!empty($q)) {
+    $q = json_decode($q);
+    foreach ($query as $k => $v) {
+      if (isset($q->$k)) $query->$k = $q->$k;
+    }
+  }
+  
+  return $q;
+
+}
+
+
