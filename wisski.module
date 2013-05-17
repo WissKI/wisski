@@ -136,7 +136,7 @@ function wisski_form(&$node, $form_state) {
 	// @TODO: handle multiple instanciation of individuals
 	$type = "";
 	// Read from the database if we are in edit mode
-	if(sizeof(wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type')) > 0) {
+	if(!empty($node->title) && sizeof(wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type')) > 0) {
 		$returned = wisski_store_getObj()->wisski_ARCAdapter_getObjForSubjPred($node->title, 'rdf:type'); 
 		$type = wisski_store_getObj()->wisski_ARCAdapter_addNamespace($returned[0]);
 	}
