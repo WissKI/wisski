@@ -747,7 +747,7 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
     $block2 = module_invoke('wisski_pathbuilder', 'block', 'view', 0);
     // by Martin Scholz: made textmod compat
     if (!module_exists('wisski_textmod')) {
-      $block1 = module_invoke('wisski_pathbuilder', 'block', 'view', 1);
+      $block1['content'] = wisski_pathbuilder_getText($node);
     } else {
       $block_own_text = module_invoke('wisski_textmod', 'block', 'view', 1);
       $block_foreign_text = module_invoke('wisski_textmod', 'block', 'view', 2);
