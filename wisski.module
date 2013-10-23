@@ -749,10 +749,17 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
     if (!module_exists('wisski_textmod')) {
       $block1['content'] = wisski_pathbuilder_getText($node);
     } else {
-      $block_own_text = module_invoke('wisski_textmod', 'block', 'view', 1);
-      $block_foreign_text = module_invoke('wisski_textmod', 'block', 'view', 2);
-      $block1['content'] = '<div class="wisski_textmod_own_texts_region">' . $block_own_text['content'] . '</div>';
-      $block1['content'] .= '<div class="wisski_textmod_foreign_text_region">' . $block_foreign_text['content'] . '</div>';
+      if (function_exists('wisski_textmod_render')) {
+        $block_own_text = wisski_textmod_render($node, 1);
+        $block_foreign_text = wisski_textmod_render($node, 2);
+        $block1['content'] = '<div class="wisski_textmod_own_texts_region">' . $block_own_text . '</div>';
+        $block1['content'] .= '<div class="wisski_textmod_foreign_text_region">' . $block_foreign_text . '</div>';
+      } else {
+        $block_own_text = module_invoke('wisski_textmod', 'block', 'view', 1);
+        $block_foreign_text = module_invoke('wisski_textmod', 'block', 'view', 2);
+        $block1['content'] = '<div class="wisski_textmod_own_texts_region">' . $block_own_text['content'] . '</div>';
+        $block1['content'] .= '<div class="wisski_textmod_foreign_text_region">' . $block_foreign_text['content'] . '</div>';
+      }
     }
     // end textmod compat
 //    $content = '<div id="wki-content-right">' . $block2['content'] . '</div>' . '<div id="wki-content-left">' . $block1['content'] .  '</div>';
