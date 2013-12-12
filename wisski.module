@@ -101,6 +101,21 @@ function wisski_form(&$node, $form_state) {
 			'#value' => $node,
 	);
 
+  if (module_exists('wisski_textmod')) {
+    // we need to add the node body in order to get it written back
+    // in the db
+    $form['body'] = array(
+      '#type' => 'value',
+      '#value' => $node->body,
+    );
+    // we don't need to sync the text when in form-based input method
+/*    $form['textmod_sync'] = array(
+      '#type' => 'value',
+      '#value' => WISSKI_TEXTMOD_NO_SYNC,
+    );
+*/  }
+
+
 	// If we come from "annotate text" the session memory is in $_SESSION
 	if(isset($_SESSION['storage'])) {
 		// get the old triples out of the form_state
@@ -673,7 +688,7 @@ function wisski_node_form_next_handler($form, &$form_state) {
 function wisski_node_form_final_submit($form, &$form_state) {
 	$node = $form_state['values']['node'];
 	
-	$outTriples = array();
+  $outTriples = array();
 	foreach($form_state['storage']['ownTriples'] as $triple) {
 		// TODO: Hier Literals verarbeiten! Immer wenn String, int ... dann literal!
 		$trip = array();
@@ -848,6 +863,7 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
 
 function wisski_insert(&$node) {
 //  drupal_set_message("Insert called!");
+//  drupal_set_message(serialize($node));
   if(module_exists("path")) {
 		path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
 		$node->path = "content/" . wisski_store_makePathTitle($node->title);
