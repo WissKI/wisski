@@ -961,7 +961,7 @@ function wisski_menu() {
 		'type'     => MENU_LOCAL_TASK,
   );
 
-		$items['node/%node/delete'] = array(
+		$items['node/%node/wdelete'] = array(
    	'title'    => t('Delete'),
     'page callback' => 'drupal_get_form',
     'page arguments' => array('wisski_delNodeQuestion'),
