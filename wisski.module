@@ -782,11 +782,11 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
     unset($node->content['body']);
     unset($node->content['teaser']);
     $node->content['wisski-right'] = array(
-      '#weight' => -10000,
+      '#weight' => -9999,
       '#value' => '<div id="wki-content-right">' . $block2['content'] . '</div>',
     );
     $node->content['wisski-left'] = array(
-      '#weight' => -9999,
+      '#weight' => -10000,
       '#value' => '<div id="wki-content-left">' . $block1['content'] . '</div>',
     );
     $node->content['wisski-other'] = array(
