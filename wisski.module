@@ -57,9 +57,49 @@ function wisski_node_info() {
     )
   );
 }
+/*
+function wisski_menu_alter(&$items) {
+//  drupal_set_message("haha!" . serialize($items['node/%node']));
+  
+//  foreach($items as $key => $value)
+//    drupal_set_message($key);
 
+  $items['node/%node']['title callback'] = "wisski_page_title";
 
-function wisski_nodeapi(&$node, $op) {
+}
+*/
+/*
+function wisski_page_title($node) {
+    
+  if($node->type == "individual") {
+    drupal_set_message("individual!");
+    module_load_include('inc', 'wisski_pathbuilder');
+    $inst = wisski_store_getObj()->wisski_ARCAdapter_delNamespace($node->title);
+    if (!$inst) return;
+    $gid = wisski_pathbuilder_getGroupIDForIndividual($inst);
+    if ($gid == -1) return;
+    
+    drupal_set_message(wisski_pathbuilder_generateGroupName($inst, $gid));
+    return wisski_pathbuilder_generateGroupName($inst, $gid);
+  }
+  
+  return node_page_title($node);
+}
+
+function wisski_menu_link_alter(&$item, $menu) {
+  drupal_set_message(serialize($item));
+  //if($item['module'] == "book") {
+  if($menu == "book-toc-1250289") {
+    drupal_set_message(serialize($item));
+    $nodeid = substr($item['link_path'], 5);
+    drupal_set_message($nodeid);
+//    $node = node_load($item[
+  }
+//  drupal_set_message("wmla: " . serialize($menu));
+}
+*/
+
+function wisski_nodeapi(&$node, $op, $a3 = NULL, $a4 = NULL) {
 
   if ($node->type != 'individual') return;
 
@@ -74,6 +114,9 @@ function wisski_nodeapi(&$node, $op) {
     
   }
 }
+
+
+
 
 
 /**
@@ -756,10 +799,11 @@ function wisski_access($op, $node, $account) {
 function wisski_view($node, $teaser = FALSE, $page = FALSE) {
 	
   $node = node_prepare($node, $teaser);
-  
+
   // added by Martin: return site content to make content accessible to Drupal search
   if ($node->type == "individual" && module_exists('wisski_pathbuilder')) {  
-    $block2 = module_invoke('wisski_pathbuilder', 'block', 'view', 0);
+    //$block2 = module_invoke('wisski_pathbuilder', 'block', 'view', 0);
+    $block2['content'] = wisski_pathbuilder_template_view(array(), $node);
     // by Martin Scholz: made textmod compat
     if (!module_exists('wisski_textmod')) {
       $block1['content'] = wisski_pathbuilder_getText($node);
@@ -852,7 +896,6 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
   );
   }
 
-  
 
   return $node;
 }
@@ -871,6 +914,7 @@ function wisski_insert(&$node) {
 		path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
 		$node->path = "content/" . wisski_store_makePathTitle($node->title);
 	}
+          
 }
 
 /**
@@ -887,6 +931,7 @@ function wisski_delete(&$node) {
 function wisski_update(&$node) {
   $title = $node->title;
   if(empty($title)) {
+//    drupal_set_message(serialize(debug_backtrace()));
     $realnode = $node->node;
     $title = $realnode->title;
   }
@@ -898,6 +943,7 @@ function wisski_update(&$node) {
     path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($title));
 		$node->path = "content/" . wisski_store_makePathTitle($title);
   }
+
   
 }
 
