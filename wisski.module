@@ -803,6 +803,7 @@ function wisski_view($node, $teaser = FALSE, $page = FALSE) {
   // added by Martin: return site content to make content accessible to Drupal search
   if ($node->type == "individual" && module_exists('wisski_pathbuilder')) {  
     //$block2 = module_invoke('wisski_pathbuilder', 'block', 'view', 0);
+    module_load_include('inc', 'wisski_pathbuilder', 'wisski_pathbuilder');
     $block2['content'] = wisski_pathbuilder_template_view(array(), $node);
     // by Martin Scholz: made textmod compat
     if (!module_exists('wisski_textmod')) {
