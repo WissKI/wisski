@@ -729,8 +729,9 @@ function wisski_node_form_next_handler($form, &$form_state) {
  */
  
 function wisski_node_form_final_submit($form, &$form_state) {
+  
 	$node = $form_state['values']['node'];
-	
+
   $outTriples = array();
 	foreach($form_state['storage']['ownTriples'] as $triple) {
 		// TODO: Hier Literals verarbeiten! Immer wenn String, int ... dann literal!
@@ -784,6 +785,9 @@ function wisski_access($op, $node, $account) {
   if ($op == 'delete') {
     if (user_access('wisski delete any node', $account) || (user_access('wisski delete own node', $account) && ($account->uid == $node->uid))) {
       return TRUE;
+    } else {
+      drupal_set_message("You may not delete this node. Please contact your administrator for privileges.", "error");
+      return FALSE;
     }
   }
 
@@ -915,7 +919,6 @@ function wisski_insert(&$node) {
 		path_set_alias("node/" . $node->nid , "content/" . wisski_store_makePathTitle($node->title));
 		$node->path = "content/" . wisski_store_makePathTitle($node->title);
 	}
-          
 }
 
 /**
@@ -1113,11 +1116,48 @@ function wisski_delNode($nodenr) {
 * @return: Returns true or false (tabs should be loaded or not)
 */
 function wisski_loader($node, $req_permission = 'wisski node access') {
-
-	if($node->type == 'property' || $node->type == 'individual' || $node->type == 'class')
-		if(user_access($req_permission)) 
-		  return TRUE;
-	return FALSE;
+  $return = FALSE;
+       
+  global $user;
+               
+  if (is_numeric($node)) {
+  // Load the node if you need to
+    $node = node_load($node);
+  }
+                                                    
+  // not our thing?
+  if($node->type != 'property' && $node->type != 'individual' && $node->type != 'class')
+    return FALSE;
+                                                                              
+  if($req_permission == 'wisski access templateEdit') {
+    if(!user_access($req_permission))
+      return FALSE;
+                                                                                     
+    // if he has any node priviledges that is already a good point
+    if($req_permission == 'wisski access templateEdit' && user_access('wisski edit any node'))
+      $return = TRUE;
+     
+    // if he doesn't have them we have to check if he may edit his nodes and if it is his node
+    if($req_permission == 'wisski access templateEdit' && user_access('wisski edit own node') &&  $node->uid == $user->uid)
+      $return = TRUE;           
+  } else if($req_permission == 'wisski delete any node' || $req_permission == 'wisski delete own node') {
+    if(!user_access($req_permission))
+      return FALSE;
+      
+    // if he doesn't have them we have to check if he may edit his nodes and if it is his node
+    if($req_permission == 'wisski delete own node' &&  user_access($req_permission) && $node->uid == $user->uid)
+      $return = TRUE;
+    
+    if($req_permission == 'wisski delete any node' && user_access($req_permission))
+      $return = TRUE;    
+      
+  } else {
+    if(user_access($req_permission))
+      $return = TRUE;
+  }
+  
+  return $return;
+                                                                                                                                                                                                                                                                                                                    
 }
 
 /**
