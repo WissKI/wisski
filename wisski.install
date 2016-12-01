@@ -59,40 +59,40 @@ function wisski_install() {
   $item = wisski_get_item();  
   $item['link_path'] = ("<front>");
   $item['link_title'] = t("Home");  
-  $menu_ids[] = menu_link_save(&$item);
+  $menu_ids[] = menu_link_save($item);
 
   $item = wisski_get_item();
   $item['link_path'] = ("node/" . $anode->nid);
   $item['link_title'] = t("About us");
   $item['weight'] = -49;  
-  $menu_ids[] = menu_link_save(&$item);
+  $menu_ids[] = menu_link_save($item);
   
   if(module_exists("contact")) {
     $item = wisski_get_item();
     $item['link_path'] = "contact";
     $item['link_title'] = t("Contact");
     $item['weight'] = -48;  
-    $menu_ids[] = menu_link_save(&$item);
+    $menu_ids[] = menu_link_save($item);
   }
   
   $item = wisski_get_item();
   $item['link_path'] = "user/login";
   $item['link_title'] = t("Login");
   $item['weight'] = -47;  
-  $menu_ids[] = menu_link_save(&$item);
+  $menu_ids[] = menu_link_save($item);
   
   $item = wisski_get_item();
   $item['link_path'] = "logout";
   $item['link_title'] = t("Logout");
   $item['weight'] = -46;  
-  $menu_ids[] = menu_link_save(&$item);
+  $menu_ids[] = menu_link_save($item);
     
   $item = wisski_get_item();
   $item['menu_name'] = "secondary-links";
   $item['link_path'] = "node/add";
   $item['link_title'] = t("Create");
   $item['weight'] = -48;  
-  $menu_ids[] = menu_link_save(&$item);
+  $menu_ids[] = menu_link_save($item);
   
   variable_set("wisski_menu_ids", $menu_ids);
   variable_set("wisski_node_ids",$node_ids);
